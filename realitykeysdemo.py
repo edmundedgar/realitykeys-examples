@@ -87,7 +87,7 @@ def user_private_key(create_if_missing=False):
                 raise Exception("Seed file not found. Run %s makekeys to generate it or set it as the SEED environmental variable." % (script_name))
 
         with open(seed_file, 'r') as s:
-            seed = s.read()
+            seed = s.read().rstrip()
 
         if seed is None or seed == "":
             raise Exception("Seed file was empty or unreadable.")
@@ -270,8 +270,7 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # It should be the same except that ours is unsigned, in which case we'll throw away our transaction and use theirs instead.
     signatures_done = 0
     if existing_tx is not None:
-        print "tryint existing"
-        print existing_tx
+        #print existing_tx
         their_tx = deserialize(existing_tx)
         our_tx = deserialize(tx)
         # Compare the transactions, except the inputs, which are signed and we don't care anyway.
@@ -367,11 +366,11 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
 
     if winner == "Yes":
         if (yes_compound_public_key != winner_public_key_from_winner_private_key):
-            print "Could not recreate the expected public keys from the private key supplied, giving up."
+            print "Could not recreate the expected public keys from the private key supplied. Are you sure you won?"
             sys.exit()
     elif winner == "No":
         if (no_compound_public_key != winner_public_key_from_winner_private_key):
-            print "Could not recreate the expected public keys from the private key supplied, giving up."
+            print "Could not recreate the expected public keys from the private key supplied, Are you sure you won?."
             sys.exit()
     else:
         print "Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner)
