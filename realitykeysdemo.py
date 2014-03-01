@@ -247,6 +247,10 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # It would be cleaner to do this with OP_IF / OP_ELSE logic in the transaction script, but that would fail IsStandard checks.
 
     # TODO: Add a third key for the two parties so that they can settle themselves without Reality Keys if they prefer.
+    # Ideally we'd do;
+    # 2/4 yes_compound_public_key, no_compound_public_key, yes_winner_public_key, no_winner_public_key
+    # If that's non-standard (not sure), we could do:
+    # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_key
 
     yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
     no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
@@ -266,17 +270,26 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # It should be the same except that ours is unsigned, in which case we'll throw away our transaction and use theirs instead.
     signatures_done = 0
     if existing_tx is not None:
+        print "tryint existing"
+        print existing_tx
         their_tx = deserialize(existing_tx)
         our_tx = deserialize(tx)
-        print "Need to compare their tx:"
-        print their_tx
-        print "... to our tx:"
-        print our_tx
+        # Compare the transactions, except the inputs, which are signed and we don't care anyway.
+        # Alternatively we could go through these and just remove the signatures, but it shouldn't matter.
+        # Being honest they haven't horsed around with their tx and sent us this instead.
+        # If they had we'd catch them here.
+        # their_tx['outs'] = [{'value': 110000, 'script': '1NGtmZttBEUGWTTGGyQTHTTrC76dHXPEZt'}]
+        our_tx['ins'] = []
+        their_tx['ins'] = []
+        if serialize(our_tx) != serialize(their_tx):
+            print "The transaction we received was not what we expected."
+            print "Aborting."
+            sys.exit()
         tx = existing_tx
         signatures_done = signatures_done + 1
 
-    print "Unsigned:"
-    print deserialize(tx)
+    #print "Unsigned:"
+    #print deserialize(tx)
     # We can assume 
 
     # Sign whichever of the inputs we have the private key for. 
@@ -284,14 +297,14 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     if (am_i_yes_or_no == 'yes') and (yes_stake_amount > 0):
         tx = sign(tx,0,private_key)
         signatures_done = signatures_done + 1
-        print "Signed yes:"
-        print deserialize(tx)
+        #print "Signed yes:"
+        #print deserialize(tx)
 
     if (am_i_yes_or_no == 'no') and (no_stake_amount > 0):
         tx = sign(tx,1,private_key)
         signatures_done = signatures_done + 1
-        print "Signed no:"
-        print deserialize(tx)
+        #print "Signed no:"
+        #print deserialize(tx)
 
     if signatures_needed == signatures_done:
         if is_nopushtx:
@@ -304,6 +317,8 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
             print "Next step: Wait for the result, then the winner runs:"
             print "./realitykeysdemo.py claim %s %s %s %s [<fee>] [<send_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key, tx)
     else:
+        print "Created a transaction:"
+        print tx
         print "Next step: The other party runs:"
         print "./realitykeysdemo.py setup %s %s %s %s %s %s" % (fact_id, yes_winner_public_key, str(yes_stake_amount), no_winner_public_key, str(no_stake_amount), tx)
 
