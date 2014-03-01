@@ -2,6 +2,8 @@
 
 # This script allows two parties who don't trust each other to create a contract conditional on the outcome of a Reality Key.
 # The actual Reality Keys are fetched automatically using the Reality Keys API, so the users only need to supply their own keys.
+# It requires pybitcointools, which you can get here:
+# https://github.com/vbuterin/pybitcointools
 
 # Steps:
 
