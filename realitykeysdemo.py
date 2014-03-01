@@ -250,7 +250,7 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # Ideally we'd do;
     # 2/4 yes_compound_public_key, no_compound_public_key, yes_winner_public_key, no_winner_public_key
     # If that's non-standard (not sure), we could do:
-    # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_key
+    # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_public_key
 
     yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
     no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
@@ -315,7 +315,7 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
             print tx
             pushtx(tx)
             print "Next step: Wait for the result, then the winner runs:"
-            print "./realitykeysdemo.py claim %s %s %s %s [<fee>] [<send_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key, tx)
+            print "./realitykeysdemo.py claim %s %s %s [<fee>] [<send_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key)
     else:
         print "Created a transaction:"
         print tx
@@ -401,7 +401,7 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
     outs = [{'value': val, 'address': send_to_address}]
     tx = mktx(transactions, outs)
 
-    print deserialize(tx)
+    #print deserialize(tx)
     sig1 = multisign(tx,0,multisig_script,winner_compound_private_key)
     multi_tx = apply_multisignatures(tx,0,multisig_script,[sig1])
 
