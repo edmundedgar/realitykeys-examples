@@ -24,7 +24,9 @@
 # If Bob or Alice disappears before completing the transaction, the other person can get the money back from the temporary address with:
 #    ./realitykeysdemo.py pay <address> <amount> [<fee>]"
 
-# Alice: Creates a transaction spending the contents of both her and Bob's temporary address, signed with her private key.
+# Alice: 
+#    Creates a 1/2 (for now) P2SH address for combinations of ( her key + rk-yes ) or ( his key + rk-no ).
+#    Creates a transaction spending the contents of both her and Bob's temporary address, signed with her private key.
 #    ./realitykeysdemo.py setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount>" 
 #    (This outputs a serialized, partially-signed transaction which she then sends to Bob to complete and broadcast.)
 
@@ -94,7 +96,7 @@ def user_private_key(create_if_missing=False):
 
     return sha256(seed)
 
-def spendable_output(addr, stake_amount, MIN_TRANSACTION_FEE, MAX_TRANSACTION_FEE=0):
+def spendable_output(addr, stake_amount, min_transaction_fee, max_transaction_fee=0):
     """Return an output for the specified amount, plus fee, or None if it couldn't find one.
     Fetched by querying blockchain.info.
     This is very primitive, and assumes you've already put exactly the right amount into the address.
@@ -110,17 +112,17 @@ def spendable_output(addr, stake_amount, MIN_TRANSACTION_FEE, MAX_TRANSACTION_FE
     for o in outputs:
 
         val = o['value']
-        if MAX_TRANSACTION_FEE > 0 and val > ( stake_amount + MAX_TRANSACTION_FEE ):
+        if max_transaction_fee > 0 and val > ( stake_amount + max_transaction_fee ):
             #print "Too much money in input implying too-high fee."
-            #print "Could continue but the fee " + str(val-pay_amount)+ " which would be greater than " + str(MAX_TRANSACTION_FEE) + " and sounds too high"
+            #print "Could continue but the fee " + str(val-pay_amount)+ " which would be greater than " + str(max_transaction_fee) + " and sounds too high"
             continue
 
         if val < stake_amount:
             #print "Not enough money in input, giving up"
             continue
 
-        if val < ( stake_amount + MIN_TRANSACTION_FEE ):
-            #print "Not enough money in input to cover the minimum transaction fee of "+str(MIN_TRANSACTION_FEE)+", giving up"
+        if val < ( stake_amount + min_transaction_fee ):
+            #print "Not enough money in input to cover the minimum transaction fee of "+str(min_transaction_fee)+", giving up"
             continue
 
         return o
@@ -163,6 +165,10 @@ def execute_makekeys():
     sys.exit()
 
 def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx, is_nopushtx): 
+    """Create a P2SH address spendable by the each person's own key combined with the appropriate reality key.
+    If passed a half-signed version of the transaction created like that, sign it and broadcast it.
+    If not, create and output a half-signed version of the transaction to send to the other party to complete.
+    """
 
     yes_winner_address = pubtoaddr(yes_winner_public_key)
     no_winner_address = pubtoaddr(no_winner_public_key)
@@ -324,6 +330,8 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     sys.exit()
 
 def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, send_to_address, is_nopushtx):
+    """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <send_to_address>
+    """
 
     private_key = user_private_key()
     if send_to_address is None:
