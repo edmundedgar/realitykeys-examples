@@ -295,7 +295,6 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
 
     #print "Unsigned:"
     #print deserialize(tx)
-    # We can assume 
 
     # Sign whichever of the inputs we have the private key for. 
     # Since we only allow one input per person, and we add them ourselves, we can assume yes is first and no is second.
@@ -431,7 +430,7 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
 def execute_pay(pay_to_addr, pay_amount, fee, is_nopushtx):
     """ Make a simple payment, from a single output, with change.
 
-    You can use this to refund an aborted transaction, if the other user doesn't pay.
+    You can use this to refund an aborted transaction, if the other user fails to fund their side or fails to complete the P2SH transaction.
     """
 
     private_key = user_private_key()
