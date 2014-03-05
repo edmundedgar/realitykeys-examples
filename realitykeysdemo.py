@@ -26,7 +26,7 @@
 
 # Alice: 
 #    Creates a 1/2 (for now) P2SH address for combinations of ( her key + rk-yes ) or ( his key + rk-no ).
-#    Creates a transaction spending the contents of both her and Bob's temporary address, signed with her private key.
+#    Creates a transaction spending the contents of both her and Bob's temporary address to the P2SH address, signed with her private key.
 #    ./realitykeysdemo.py setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount>" 
 #    (This outputs a serialized, partially-signed transaction which she then sends to Bob to complete and broadcast.)
 
