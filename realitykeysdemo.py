@@ -6,8 +6,6 @@
 # https://github.com/vbuterin/pybitcointools
 
 # Steps:
-
-# Alice and Bob: Agree on a Reality Key, and get the ID <fact_id> from the URL.
  
 # Alice: Creates keys and sends the public key to Bob.   
 #    ./realitykeysdemo.py makekeys
@@ -20,6 +18,9 @@
 #    Get the public key and send it to Alice.
 #    Temporarily fund his own address with his stake.
 #    (This step makes things simpler here, although the script can be rewritten without it.)
+
+# Alice and Bob: Register a Reality Key, and get the ID <fact_id> from the URL.
+# NB They should make sure the Reality Keys were newly created and didn't exist before they exchanged keys.
 
 # If Bob or Alice disappears before completing the transaction, the other person can get the money back from the temporary address with:
 #    ./realitykeysdemo.py pay <address> <amount> [<fee>]"
@@ -255,8 +256,9 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # TODO: Add a third key for the two parties so that they can settle themselves without Reality Keys if they prefer.
     # Ideally we'd do;
     # 2/4 yes_compound_public_key, no_compound_public_key, yes_winner_public_key, no_winner_public_key
-    # If that's non-standard (not sure), we could do:
+    # If that's non-standard (not sure), we might be able to do:
     # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_public_key
+    # ... but this requires that Alice and Bob don't know each other's public keys in advance.
 
     yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
     no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
