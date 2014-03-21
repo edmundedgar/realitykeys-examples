@@ -466,52 +466,56 @@ def execute_pay(pay_to_addr, pay_amount, fee, is_nopushtx):
 
 #########################################################################
 
-arg_list = sys.argv
+def main():
+
+    arg_list = sys.argv
 
 # nopushtx flag applies to pay, claim and setup and prevents us from sending anything to the blockchain.
-is_nopushtx = "--nopushtx" in arg_list
-if is_nopushtx:
-    arg_list.remove("--nopushtx")
+    is_nopushtx = "--nopushtx" in arg_list
+    if is_nopushtx:
+        arg_list.remove("--nopushtx")
 
-args = dict(enumerate(arg_list))
-script_name = args.get(0)
+    args = dict(enumerate(arg_list))
+    script_name = args.get(0)
 
-command = args.get(1)
-if command is None:
-    print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|setup|claim|pay> [<params>]"
-    sys.exit()
-
-if command == "makekeys":
-
-    execute_makekeys()
-
-elif command == "setup":
-
-    if len(args) < 7:
-        print "Usage: ./realitykeysdemo.py [--nopushtx] setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> [<serialized_half_signed_transaction>]"
+    command = args.get(1)
+    if command is None:
+        print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|setup|claim|pay> [<params>]"
         sys.exit()
 
-    execute_setup(str(int(args.get(2))), args.get(3), int(args.get(4)), args.get(5), int(args.get(6)), args.get(7, None), is_nopushtx)
+    if command == "makekeys":
 
-elif command == "claim":
+        execute_makekeys()
 
-    if len(args) < 5:
-        print "Usage: ./realitykeysdemo.py [--nopushtx] claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<send_to_address>]"
+    elif command == "setup":
+
+        if len(args) < 7:
+            print "Usage: ./realitykeysdemo.py [--nopushtx] setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> [<serialized_half_signed_transaction>]"
+            sys.exit()
+
+        execute_setup(str(int(args.get(2))), args.get(3), int(args.get(4)), args.get(5), int(args.get(6)), args.get(7, None), is_nopushtx)
+
+    elif command == "claim":
+
+        if len(args) < 5:
+            print "Usage: ./realitykeysdemo.py [--nopushtx] claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<send_to_address>]"
+            sys.exit()
+
+        execute_claim(str(int(args.get(2))), args.get(3), args.get(4), int(args.get(5, DEFAULT_TRANSACTION_FEE)), args.get(6), is_nopushtx)
+
+    elif command == "pay":
+
+        if len(args) < 4:
+            print "Usage: ./realitykeysdemo.py [--nopushtx] pay <address> <amount> [<fee>]"
+            sys.exit()
+
+        execute_pay(args.get(2), int(args.get(3)), int(args.get(4, DEFAULT_TRANSACTION_FEE)), is_nopushtx)
+
+    else:
+
+        print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|create|complete|claim> [<params>]"
+        print "Start with ./realitykeysdemo.py makekeys"
         sys.exit()
 
-    execute_claim(str(int(args.get(2))), args.get(3), args.get(4), int(args.get(5, DEFAULT_TRANSACTION_FEE)), args.get(6), is_nopushtx)
-
-elif command == "pay":
-
-    if len(args) < 4:
-        print "Usage: ./realitykeysdemo.py [--nopushtx] pay <address> <amount> [<fee>]"
-        sys.exit()
-
-    execute_pay(args.get(2), int(args.get(3)), int(args.get(4, DEFAULT_TRANSACTION_FEE)), is_nopushtx)
-
-else:
-
-    print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|create|complete|claim> [<params>]"
-    print "Start with ./realitykeysdemo.py makekeys"
-    sys.exit()
-
+if __name__ == '__main__':
+        main()
