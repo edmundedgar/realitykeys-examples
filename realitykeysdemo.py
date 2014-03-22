@@ -37,7 +37,7 @@
 # ...Wait until the result is issued...
 
 # Alice or Bob (whoever wins):
-#    ./realitykeysdemo.py claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<send_to_address>]
+#    ./realitykeysdemo.py claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<pay_to_address>]
 #    If the broadcast fails, the script will output the transaction to send to some other bitcoind somewhere, eg:
 #    ./bitcoind sendrawtransaction <transaction> 
 
@@ -45,6 +45,7 @@ from pybitcointools import * # https://github.com/vbuterin/pybitcointools
 
 import os
 import sys
+import argparse
 
 import urllib2
 import simplejson
@@ -56,7 +57,7 @@ MAX_TRANSACTION_FEE = 20000
 MIN_TRANSACTION_FEE = 10000
 DEFAULT_TRANSACTION_FEE = 10000
 
-def user_private_key(create_if_missing=False):
+def user_private_key(create_if_missing=False, seed=None):
     """Return the private key of the current user.
 
     Normally it would come from a seed in a file in the user's home directory, generated during makekeys.
@@ -67,12 +68,12 @@ def user_private_key(create_if_missing=False):
     This is useful when experimenting, because it allows you to switch between test users easily.
 
     """
-
-    # If the user passed us a seed as an environmental variable, use that.
-    seed = os.getenv('SEED')
+    #print "using seed %s " % (seed)
 
     # Otherwise try to get it from a dotfile in the user's home directory or equivalent.
     if seed is None:
+
+        #print "no seed, getting from file"
 
         home_dir = os.getenv('HOME')
         if home_dir is None:
@@ -82,12 +83,10 @@ def user_private_key(create_if_missing=False):
         if not os.path.isfile(seed_file):
             if create_if_missing:
                 with open(seed_file, 'w') as s:
-                    print "Writing your secret seed to %s" % (seed_file)
-                    print ""
                     os.chmod(seed_file, 0600)
                     seed = s.write(random_electrum_seed())
             else:
-                raise Exception("Seed file not found. Run %s makekeys to generate it or set it as the SEED environmental variable." % (script_name))
+                raise Exception("Seed file not found, tried to create it at %s but failed." % (seed_file))
 
         with open(seed_file, 'r') as s:
             seed = s.read().rstrip()
@@ -97,13 +96,37 @@ def user_private_key(create_if_missing=False):
 
     return sha256(seed)
 
-def spendable_output(addr, stake_amount, min_transaction_fee, max_transaction_fee=0):
+def unspent_outputs(addr, filter_from_outputs=None):
+    if filter_from_outputs is not None:
+        unspents = []
+        for o in filter_from_outputs:
+            parts = o.split(":")
+            o_addr = parts[0]
+            # allow an optional blank address to just assume it's for us
+            if o_addr != "" and o_addr != addr:
+                continue
+            tx_id = parts[1]
+            idx = int(parts[2])
+            val = int(parts[3])
+            # make something like this:
+            # [{'output': u'4cc806bb04f730c445c60b3e0f4f44b54769a1c196ca37d8d4002135e4abd171:1', 'value': 50000, 'address': u'1CQLd3bhw4EzaURHbKCwM5YZbUQfA4ReY6'}]
+            unspents.append( {
+                'output': tx_id + ':' + str(idx),
+                'value': val,
+                'address': o_addr
+            } )
+        return unspents
+    else:
+        unspents = unspent(addr)
+    return unspents 
+
+def spendable_input(addr, stake_amount, min_transaction_fee, max_transaction_fee=0, inputs=None):
     """Return an output for the specified amount, plus fee, or None if it couldn't find one.
-    Fetched by querying blockchain.info.
+    Fetched by querying blockchain.info, or by passing a list in here as inputs.
     This is very primitive, and assumes you've already put exactly the right amount into the address.
     """
+    outputs = unspent_outputs(addr, inputs)
 
-    outputs = unspent(addr)
     if len(outputs) == 0:
         return None
 
@@ -131,52 +154,77 @@ def spendable_output(addr, stake_amount, min_transaction_fee, max_transaction_fe
     #print "No suitable outputs found for address %s, giving up" % (addr)
     return None
 
-def execute_makekeys():
+def magic_byte(settings):
+    if settings.get('testnet', False):
+        return 111
+    else:
+        return 0
+
+def execute_makekeys(settings):
     """Create a random seed and generate a key from it, and output the corresponding public key and address.
 
     If the seed already exists, leave it as it is and just output the information about it again.
     If the SEED environmental variable was set, forget about the seed file and work from that instead.
     """
 
-    priv = user_private_key(True)
+    seed = settings.get('seed', None)
+    verbose = settings.get('verbose', False)
+
+    priv = user_private_key(True, seed)
     pub = privtopub(priv)
-    addr = pubtoaddr(pub)
+    addr = pubtoaddr(pub, magic_byte(settings))
 
     #print "Your private key is:"
     #print priv
     #print "Please keep this safe and don't tell anyone."
     #print ""
 
-    print "Your public key is:"
-    print pub
-    print "Please send this to the other party."
-    print ""
+    out = []
 
-    print "Your temporary address is:"
-    print addr
-    print "Please make payment to this address first."
-    print ""
+    if verbose:
+        out.append("Your public key is:")
+        out.append(pub)
+        out.append("Please send this to the other party.")
+        out.append("")
+    else:
+        out.append(pub)
 
-    print "Next step: Exchange keys, pay your stake to %s, have them pay their stake to their address, then one of you runs:" % (addr)
-    print "If you are yes:"
-    print "./realitykeysdemo.py setup <fact_id> %s <your_stake_in_satoshis> <their_public_key> <their_stake_in_satoshis>" % (pub)
-    print "If you are no:"
-    print "./realitykeysdemo.py setup <fact_id> <their_public_key> <their_stake_in_satoshis> %s <your_stake_in_satoshis>" % (pub)
+    if verbose:
+        out.append("Your temporary address is:")
+        out.append(addr)
+        out.append("Please make payment to this address first.")
+        out.append("")
+    else:
+        out.append(addr)
 
-    sys.exit()
+    if verbose:
+        out.append("Next step: Exchange keys, pay your stake to %s, have them pay their stake to their address, then one of you runs:" % (addr))
+        out.append("If you are yes:")
+        out.append("./realitykeysdemo.py setup <fact_id> %s <your_stake_in_satoshis> <their_public_key> <their_stake_in_satoshis>" % (pub))
+        out.append("If you are no:")
+        out.append("./realitykeysdemo.py setup <fact_id> <their_public_key> <their_stake_in_satoshis> %s <your_stake_in_satoshis>" % (pub))
 
-def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx, is_nopushtx): 
+    return out
+
+def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx): 
     """Create a P2SH address spendable by the each person's own key combined with the appropriate reality key.
     If passed a half-signed version of the transaction created like that, sign it and broadcast it.
     If not, create and output a half-signed version of the transaction to send to the other party to complete.
     """
 
-    yes_winner_address = pubtoaddr(yes_winner_public_key)
-    no_winner_address = pubtoaddr(no_winner_public_key)
+    out = []
+
+    fact_id = str(fact_id)
+    verbose = settings.get('verbose', False)
+    seed = settings.get('seed', None)
+
+    yes_winner_address = pubtoaddr(yes_winner_public_key, magic_byte(settings))
+    no_winner_address = pubtoaddr(no_winner_public_key, magic_byte(settings))
 
     # The private key of the person currently using the script.
     # Both parties will need to run the script in turn, substituting their own public keys.
-    private_key = user_private_key()
+    private_key = user_private_key(False, seed)
+    #print "my priv key is %s" % (private_key)
 
     # Find out if the current user is we're representing yes or no.
     # This will tell us which input to sign, and help us provide user feedback.
@@ -186,16 +234,12 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     elif public_key == no_winner_public_key:
         am_i_yes_or_no = 'no'
     else:
-        print "Neither of the public keys supplied matched the private key supplied."
-        print "For simplicity, this script expects you to use the same keypair to temporarily fund an address that you use to unlock the final result if you win."
-        print "Giving up, sorry."
-        sys.exit()
+        raise Exception("Neither of the public keys supplied matched the private key supplied :%s:%s:%s:%s:." % (private_key, public_key, yes_winner_public_key, no_winner_public_key))
 
     # The amount pledged by yes and no combined will be locked up as a single output in a p2sh address.
     contract_total_amount = yes_stake_amount + no_stake_amount
     if (contract_total_amount == 0):
-        print "Contract is zero, nothing to do."
-        sys.exit()
+        raise Exception("Neither of the public keys supplied matched the private key supplied.")
 
     # We've assumed that there is a single output paid the address owned by each party that can be used as inputs.
     # This means each party can create the whole transaction (except the signatures) independently, even the other party's inputs. 
@@ -209,34 +253,40 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     signatures_needed = 0
     if yes_stake_amount > 0:
         signatures_needed = signatures_needed + 1
-        yes_input = spendable_output(yes_winner_address, yes_stake_amount, MIN_TRANSACTION_FEE/2, MAX_TRANSACTION_FEE/2)
+        yes_input = spendable_input(yes_winner_address, yes_stake_amount, MIN_TRANSACTION_FEE/2, MAX_TRANSACTION_FEE/2, settings.get('inputs', None))
         if yes_input is not None:
             inputs = inputs + [yes_input]
 
     if no_stake_amount > 0:
         signatures_needed = signatures_needed + 1
-        no_input = spendable_output(no_winner_address, no_stake_amount, MIN_TRANSACTION_FEE/2, MAX_TRANSACTION_FEE/2)
+        no_input = spendable_input(no_winner_address, no_stake_amount, MIN_TRANSACTION_FEE/2, MAX_TRANSACTION_FEE/2, settings.get('inputs', None))
         if no_input is not None:
             inputs = inputs + [no_input]
 
     if (yes_stake_amount > 0 and yes_input is None) or (no_stake_amount > 0 and no_input is None):
-        print "The temporary addresses have not yet been fully funded."
+        if verbose:
+            out.append("The temporary addresses have not yet been fully funded.")
         if (yes_stake_amount > 0 and yes_input is None):
             if am_i_yes_or_no == 'yes':
-                print "Please fund the following (yes):"
+                if verbose:
+                    out.append("Please fund the following (yes):")
             else:
-                print "Please ask the other party to fund the following (yes):"
-            print "Yes: %s satoshis to the address %s" % (str(yes_stake_amount), yes_winner_address)
+                if verbose:
+                    out.append("Please ask the other party to fund the following (yes):")
+            if verbose:
+                out.append("Yes: %s satoshis to the address %s" % (str(yes_stake_amount), yes_winner_address))
 
         if (no_stake_amount > 0 and no_input is None):
             if am_i_yes_or_no == 'no':
-                print "Please fund the following (no):"
+                if verbose:
+                    out.append("Please fund the following (no):")
             else:
-                print "Please ask the other party to fund the following (no):"
+                if verbose:
+                    out.append("Please ask the other party to fund the following (no):")
 
-            print "No: %s satoshis to the address %s" % (str(no_stake_amount), no_winner_address)
-
-        sys.exit()
+            if verbose:
+                out.append("No: %s satoshis to the address %s" % (str(no_stake_amount), no_winner_address))
+        return out 
 
     # Fetch the reality key public keys for yes and no.
     req = urllib2.Request(REALITY_KEYS_API % (fact_id))
@@ -265,10 +315,12 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
 
     multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
     pay_to_addr = p2sh_scriptaddr(multisig_script)
-    print "Made p2sh address: %s. Creating a transaction to fund it." % (pay_to_addr)
+    if verbose:
+        out.append("Made p2sh address: %s. Creating a transaction to fund it." % (pay_to_addr))
 
     outputs = [{'value': contract_total_amount, 'address': pay_to_addr}]
-
+    #print "making tx with inputs:"
+    #print inputs
     tx = mktx(inputs, outputs)
 
     # The first person runs the script without passing it a transaction. The existing_tx will be None and we use the one we just made.
@@ -289,9 +341,7 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
         our_tx['ins'] = []
         their_tx['ins'] = []
         if serialize(our_tx) != serialize(their_tx):
-            print "The transaction we received was not what we expected."
-            print "Aborting."
-            sys.exit()
+            raise Exception("The transaction we received was not what we expected.")
         tx = existing_tx
         signatures_done = signatures_done + 1
 
@@ -301,42 +351,53 @@ def execute_setup(fact_id, yes_winner_public_key, yes_stake_amount, no_winner_pu
     # Sign whichever of the inputs we have the private key for. 
     # Since we only allow one input per person, and we add them ourselves, we can assume yes is first and no is second.
     if (am_i_yes_or_no == 'yes') and (yes_stake_amount > 0):
+        #print "i am yes, signing 0"
         tx = sign(tx,0,private_key)
         signatures_done = signatures_done + 1
         #print "Signed yes:"
         #print deserialize(tx)
 
     if (am_i_yes_or_no == 'no') and (no_stake_amount > 0):
+        #print "i am no, signing 1"
         tx = sign(tx,1,private_key)
         signatures_done = signatures_done + 1
         #print "Signed no:"
         #print deserialize(tx)
 
     if signatures_needed == signatures_done:
-        if is_nopushtx:
-            print "Created the following transaction, but won't broadcast it because you specified --nopushtx:"
-            print tx
+        if settings.get('no_pushtx', False):
+            if verbose:
+                out.append("Created the following transaction, but won't broadcast it because you specified --no_pushtx:")
+            out.append(tx)
         else:
-            print "Broadcasting transaction...:"
-            print tx
-            pushtx(tx)
-            print "Next step: Wait for the result, then the winner runs:"
-            print "./realitykeysdemo.py claim %s %s %s [<fee>] [<send_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key)
+            if verbose:
+                out.append("Broadcasting transaction...:")
+                out.append(tx)
+                pushtx(tx)
+                out.append("Next step: Wait for the result, then the winner runs:")
+                out.append("./realitykeysdemo.py claim %s %s %s [<fee>] [<pay_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key))
     else:
-        print "Created a transaction:"
-        print tx
-        print "Next step: The other party runs:"
-        print "./realitykeysdemo.py setup %s %s %s %s %s %s" % (fact_id, yes_winner_public_key, str(yes_stake_amount), no_winner_public_key, str(no_stake_amount), tx)
+        if verbose:
+            out.append("Created a transaction:")
+        out.append(tx)
+        if verbose:
+            out.append("Next step: The other party runs:")
+            out.append("./realitykeysdemo.py setup %s %s %s %s %s %s" % (fact_id, yes_winner_public_key, str(yes_stake_amount), no_winner_public_key, str(no_stake_amount), tx))
 
-    sys.exit()
+    return out
 
-def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, send_to_address, is_nopushtx):
-    """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <send_to_address>
+def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key, fee=0, pay_to_address=None):
+    """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <pay_to_address>
     """
 
-    private_key = user_private_key()
-    if send_to_address is None:
-        send_to_address = pubtoaddr(privtopub(private_key))
+    out = []
+
+    verbose = settings.get('verbose', False)
+    seed = settings.get('seed', None)
+
+    private_key = user_private_key(False, seed)
+    if pay_to_address is None:
+        pay_to_address = pubtoaddr(privtopub(private_key), magic_byte(settings))
     
     # Get the reality keys representing "yes" and "no".
     req = urllib2.Request(REALITY_KEYS_API % (fact_id))
@@ -349,12 +410,12 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
     winner_privkey = fact_json['winner_privkey']
 
     if winner is None:
-        print "The winner of this fact has not yet been decided. Please try again later."
-        sys.exit()
+        out.append("The winner of this fact has not yet been decided. Please try again later.")
+        return out
 
     if winner_privkey is None:
-        print "This fact has been decided but the winning key has not been published yet. Please try again later."
-        sys.exit()
+        out.append("This fact has been decided but the winning key has not been published yet. Please try again later.")
+        return out
 
     # Combine the key of the person who wins on "yes" with the "yes" reality key
     # ...and the key of the person who wins on "no" with the "no" reality key
@@ -370,52 +431,51 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
     try:
         winner_public_key_from_winner_private_key = privtopub(winner_compound_private_key)
     except:
-        print "An error occurred trying to recreate the expected public keys from the private key supplied, giving up."
-        sys.exit()
+        raise Exception("An error occurred trying to recreate the expected public keys from the private key supplied, giving up.")
 
     if winner == "Yes":
         if (yes_compound_public_key != winner_public_key_from_winner_private_key):
-            print "Could not recreate the expected public keys from the private key supplied. Are you sure you won?"
-            sys.exit()
+            raise Exception("Could not recreate the expected public keys from the private key supplied. Are you sure you won?")
     elif winner == "No":
         if (no_compound_public_key != winner_public_key_from_winner_private_key):
-            print "Could not recreate the expected public keys from the private key supplied, Are you sure you won?."
-            sys.exit()
+            raise Exception("Could not recreate the expected public keys from the private key supplied, Are you sure you won?.")
     else:
-        print "Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner)
-        sys.exit()
+        raise Exception("Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner))
 
     # Regenerate the p2sh address we used during setup:
     multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
     p2sh_address = p2sh_scriptaddr(multisig_script)
 
-    transactions = unspent(p2sh_address)
+    transactions = [spendable_input(p2sh_address, 0, 0, 0, settings.get('inputs', None))]
+
     if len(transactions) == 0:
-        print "There do not seem to be any payments made to this address."
-        sys.exit()
+        out.append("There do not seem to be any payments made to this address.")
+        return out
     
     val = 0
-    for out in transactions:
+    for outtrans in transactions:
         # eg [{'output': u'4cc806bb04f730c445c60b3e0f4f44b54769a1c196ca37d8d4002135e4abd171:1', 'value': 50000, 'address': u'1CQLd3bhw4EzaURHbKCwM5YZbUQfA4ReY6'}]
-        val = val + out['value']
+        val = val + outtrans['value']
 
     if val == 0:
-        print "Nothing to spend."
-        sys.exit()
+        raise Exception("Nothing to spend.")
+        return out
 
     val = val - fee
-    print "Found %s in the P2SH address" % (str(val))
+    if verbose:
+        out.append("Found %s in the P2SH address" % (str(val)))
 
-    outs = [{'value': val, 'address': send_to_address}]
+    outs = [{'value': val, 'address': pay_to_address}]
     tx = mktx(transactions, outs)
 
     #print deserialize(tx)
     sig1 = multisign(tx,0,multisig_script,winner_compound_private_key)
     multi_tx = apply_multisignatures(tx,0,multisig_script,[sig1])
 
-    if is_nopushtx:
-        print "Created the following transaction, but won't broadcast it because you specified --nopushtx:"
-        print multi_tx
+    if settings.get('no_pushtx', False):
+        if verbose:
+            out.append("Created the following transaction, but won't broadcast it because you specified --no_pushtx:")
+        out.append(multi_tx)
     else:
         # blockchain.info seems to reject this transaction.
         # confusingly, it seems to go ok with bitcoind
@@ -425,97 +485,124 @@ def execute_claim(fact_id, yes_winner_public_key, no_winner_public_key, fee, sen
             try:
                 eligius_pushtx(multi_tx)
             except:
-                print "We think this should be a valid, standard transaction, but the blockchain.info API won't accept it."
-                print "You can send it with bitcoind instead:"
-                print "./bitcoind sendrawtransaction %s" % (multi_tx)
+                if verbose:
+                    out.append("We think this should be a valid, standard transaction, but the blockchain.info API won't accept it.")
+                    out.append("You can send it with bitcoind instead:")
+                    out.append("./bitcoind sendrawtransaction %s" % (multi_tx))
+                else: 
+                    out.append(multi_tx)
 
-def execute_pay(pay_to_addr, pay_amount, fee, is_nopushtx):
+    return out
+
+def execute_pay(settings, pay_to_addr, pay_amount, fee):
     """ Make a simple payment, from a single output, with change.
 
     You can use this to refund an aborted transaction, if the other user fails to fund their side or fails to complete the P2SH transaction.
     """
 
-    private_key = user_private_key()
+    out = []
+
+    seed = settings.get('seed', None)
+
+    private_key = user_private_key(False, seed)
     public_key = privtopub(private_key)
-    addr = pubtoaddr(public_key)
+    addr = pubtoaddr(public_key, magic_byte(settings))
 
     if addr == pay_to_addr:
-        print "Paying yourself..."
+        if verbose:
+            out.append("Paying yourself...")
 
-    spendable_input = spendable_output(addr, pay_amount, fee, 0)
-    if spendable_input is None:
-        print "Could not find an output to spend, giving up."
-        sys.exit()
+    spendable_in = spendable_input(addr, pay_amount, fee, 0, settings.get('inputs', None))
+    if spendable_in is None:
+        raise Exception("Could not find an output to spend, giving up.")
 
-    remainder = spendable_input['value'] - pay_amount - fee 
+    remainder = spendable_in['value'] - pay_amount - fee 
 
     outputs = [{'value': pay_amount, 'address': pay_to_addr}]
     if remainder > 0:
-        print "Sending %s back to the original address as change." % (str(remainder))
+        if verbose:
+            out.append("Sending %s back to the original address as change." % (str(remainder)))
         change_outputs = [{'value': remainder, 'address': addr}]
         outputs = outputs + change_outputs
 
-    tx = mktx([spendable_input], outputs)
+    tx = mktx([spendable_in], outputs)
     tx = sign(tx, 0, private_key)
 
-    if is_nopushtx:
-        print "Created the following transaction, but won't broadcast it because you specified --nopushtx:"
-        print tx
+    if no_pushtx:
+        if verbose:
+            out.append("Created the following transaction, but won't broadcast it because you specified --no_pushtx:")
+        out.append(tx)
     else:
         pushtx(tx)
+
+    return out
 
 #########################################################################
 
 def main():
 
-    arg_list = sys.argv
+    parser = create_parser()
+    args = parser.parse_args()
 
-# nopushtx flag applies to pay, claim and setup and prevents us from sending anything to the blockchain.
-    is_nopushtx = "--nopushtx" in arg_list
-    if is_nopushtx:
-        arg_list.remove("--nopushtx")
+    settings = {
+        'verbose': args.verbose,
+        'testnet': args.testnet,
+        'no_pushtx': args.no_pushtx,
+        'seed': args.seed,
+        'inputs': args.inputs
+    }
 
-    args = dict(enumerate(arg_list))
-    script_name = args.get(0)
-
-    command = args.get(1)
-    if command is None:
-        print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|setup|claim|pay> [<params>]"
-        sys.exit()
-
+    command = args.command
     if command == "makekeys":
-
-        execute_makekeys()
-
+        out = execute_makekeys(settings)
     elif command == "setup":
-
-        if len(args) < 7:
-            print "Usage: ./realitykeysdemo.py [--nopushtx] setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> [<serialized_half_signed_transaction>]"
-            sys.exit()
-
-        execute_setup(str(int(args.get(2))), args.get(3), int(args.get(4)), args.get(5), int(args.get(6)), args.get(7, None), is_nopushtx)
-
+        out = execute_setup(settings, args.fact_id, args.yes_key, args.yes_stake, args.no_key, args.no_stake, args.transaction)
     elif command == "claim":
-
-        if len(args) < 5:
-            print "Usage: ./realitykeysdemo.py [--nopushtx] claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<send_to_address>]"
-            sys.exit()
-
-        execute_claim(str(int(args.get(2))), args.get(3), args.get(4), int(args.get(5, DEFAULT_TRANSACTION_FEE)), args.get(6), is_nopushtx)
-
+        out = execute_claim(settings, args.fact_id, args.yes_key, args.no_key, args.fee, args.pay_to_address)
     elif command == "pay":
+        out = execute_pay(settings, args.pay_to_address, args.amount, args.fee)
 
-        if len(args) < 4:
-            print "Usage: ./realitykeysdemo.py [--nopushtx] pay <address> <amount> [<fee>]"
-            sys.exit()
+    print "\n".join(out)
 
-        execute_pay(args.get(2), int(args.get(3)), int(args.get(4, DEFAULT_TRANSACTION_FEE)), is_nopushtx)
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description='Create, setup or claim a contract using Reality Keys.'
+    )
 
-    else:
+    subparsers = parser.add_subparsers(dest='command',help='Commands: makekeys create claim pay')
+    makekeys_parser = subparsers.add_parser('makekeys')
+    setup_parser = subparsers.add_parser('setup')
+    claim_parser = subparsers.add_parser('claim')
+    pay_parser = subparsers.add_parser('pay')
 
-        print "Usage: ./realitykeysdemo.py [--nopushtx] <makekeys|create|complete|claim> [<params>]"
-        print "Start with ./realitykeysdemo.py makekeys"
-        sys.exit()
+    setup_parser.add_argument( '-y', '--yes-key', required=False, help='The public key of the user representing "yes"')
+    setup_parser.add_argument( '-Y', '--yes-stake', type=int, required=False, help='The number of statoshis staked by the party representing "yes"')
+    claim_parser.add_argument( '-y', '--yes-key', required=False, help='The public key of the user representing "yes"')
+
+    setup_parser.add_argument( '-n', '--no-key', required=False, help='The public key of the user representing "no"')
+    setup_parser.add_argument( '-N', '--no-stake', type=int, required=False, help='The number of statoshis staked by the party representing "no"')
+    claim_parser.add_argument( '-n', '--no-key', required=False, help='The public key of the user representing "no"')
+
+    setup_parser.add_argument( '-r', '--fact-id', type=int, required=False, help='The ID of the Reality Keys fact you want to base your contract on (assumes freebase)')
+    claim_parser.add_argument( '-r', '--fact-id', type=int, required=False, help='The ID of the Reality Keys fact you want to base your contract on (assumes freebase)')
+
+    setup_parser.add_argument( '-x', '--transaction', required=False, help='A serialized, part-signed transaction')
+    claim_parser.add_argument( '-d', '--pay-to-address', required=False, help='The address to send money to (pay and claim)')
+    pay_parser.add_argument( '-d', '--pay-to-address', required=False, help='The address to send money to (pay and claim)')
+
+
+    parser.add_argument( '--no-pushtx', '-P', required=False, action='store_true', help='Do not push tx')
+    parser.add_argument( '--seed', '-s', required=False, help='Seed for key generation. If not supplied this will be created automatically and stored.')
+
+    parser.add_argument( '--inputs', '-i', action='append', required=False, default=[], help='The inputs to use in transactions. If not stated we will try to fetch available inputs from the network.')
+    parser.add_argument( '--fee', '-f', type=int, required=False, default=DEFAULT_TRANSACTION_FEE, help='The address to send money to (pay and claim)')
+
+    pay_parser.add_argument( '-a', '--amount', type=int, required=False, default=0, help='The amount of money to send (pay and claim)')
+
+    parser.add_argument( '--verbose', '-v', required=False, action='store_true', help='Verbose output')
+    parser.add_argument( '--testnet', '-t', required=False, action='store_true', help='Use testnet instead of mainnet. (Some commands will only work with --no-pushtx)')
+
+    return parser
 
 if __name__ == '__main__':
-        main()
+    main()
