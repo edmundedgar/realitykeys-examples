@@ -57,6 +57,90 @@ MAX_TRANSACTION_FEE = 20000
 MIN_TRANSACTION_FEE = 10000
 DEFAULT_TRANSACTION_FEE = 10000
 
+def apply_multisignatures_with_if_hint(*args): # tx,i,script,sigs OR tx,i,script,sig1,sig2...,sig[n]
+    """A copy of the pybitcointools apply_multisignatures, but with an extra if
+    """
+
+    if_hint = 1
+    tx, i, script = args[0], int(args[1]), args[2]
+    sigs = args[3] if isinstance(args[3],list) else list(args[3:])
+
+    if re.match('^[0-9a-fA-F]*$',script): script = script.decode('hex')
+    sigs = [x.decode('hex') if x[:2] == '30' else x for x in sigs]
+    if re.match('^[0-9a-fA-F]*$',tx):
+        return apply_multisignatures_with_if_hint(tx.decode('hex'),i,script,sigs).encode('hex')
+
+    txobj = deserialize(tx)
+    txobj["ins"][i]["script"] = serialize_script([None]+sigs+[if_hint]+[script])
+    return serialize(txobj)
+
+def mk_multisig_script_if_else(combos):
+
+    combo1 = combos[0]
+    combo2 = combos[1]
+
+    OP_CHECKMULTISIG = 174
+    OP_IF = 99
+    OP_ELSE = 103
+    OP_ENDIF = 104
+
+    num_required = len(combo1)
+    num_supplied = len(combo1)
+
+    script_elements = []
+
+    # A dummy if that doesn't do anything
+    # script_elements.append(1)
+    script_elements.append(OP_IF)
+
+    script_elements.append(num_supplied)
+    script_elements.extend(combo1)
+    script_elements.append(num_required)
+    script_elements.append(OP_CHECKMULTISIG)
+
+    script_elements.append(OP_ENDIF)
+
+    return serialize_script(script_elements)
+    #return serialize_script([num_required]+combo+[num_supplied,OP_CHECKMULTISIG])
+
+    # with flags (1)
+    # x sig sig 1 
+    # op_if
+    # 2 alice rk-yes
+    # op_else 
+    # 2 bob   rk-no
+    # op_endif
+    # 2 OP_CHECKSIG
+    script_str = ""
+    script_str = script_str + OP_IF
+
+    combo = combos[0]
+    num_required = len(combo)
+    num_supplied = num_required
+    num_required_hex = str(hex(num_required+OP_NUMBER_PLUS)).lstrip("0x")
+    num_supplied_hex = str(hex(num_supplied+OP_NUMBER_PLUS)).lstrip("0x")
+    script_str = script_str + num_supplied_hex
+    for pub in combo:
+        num_bytes_hex = str(hex(len(pub) / 2)).lstrip("0x")
+        script_str = script_str + num_bytes_hex + pub
+    script_str = script_str + num_required_hex # this could be once on the end for economy 
+
+    script_str = script_str + OP_ELSE
+
+    combo = combos[1]
+    script_str = script_str + num_supplied_hex
+    for pub in combo:
+        num_bytes_hex = str(hex(len(pub) / 2)).lstrip("0x")
+        script_str = script_str + num_bytes_hex + pub
+    script_str = script_str + num_required_hex # this could be once on the end for economy 
+
+    script_str = script_str + OP_ENDIF 
+    script_str = script_str + OP_CHECKMULTISIGVERIFY
+
+    return script_str
+
+
+
 def user_private_key(create_if_missing=False, seed=None):
     """Return the private key of the current user.
 
@@ -97,6 +181,9 @@ def user_private_key(create_if_missing=False, seed=None):
     return sha256(seed)
 
 def unspent_outputs(addr, filter_from_outputs=None):
+    """ If we were passed a list of outputs to use, filter them for the right address
+     Otherwise, fetch unspent outputs for the address from blockchain.info
+    """
     if filter_from_outputs is not None:
         unspents = []
         for o in filter_from_outputs:
@@ -155,6 +242,9 @@ def spendable_input(addr, stake_amount, min_transaction_fee, max_transaction_fee
     return None
 
 def magic_byte(settings):
+    """The magic byte to be used for addresses.
+    Only supports bitcoin and bitcoin testnet, would need to be modified for other coins.
+    """
     if settings.get('testnet', False):
         return 111
     else:
@@ -295,25 +385,33 @@ def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no
     yes_reality_key = fact_json['yes_pubkey']   
     no_reality_key = fact_json['no_pubkey']
 
-    # Use ECC addition to combine the key of the person who wins on "yes" with the "yes" reality key
-    # ...and the key of the person who wins on "no" with the "no" reality key
-    # Hopefully this is a safe thing to be doing. Feedback gratefully received...
+    if settings.get('ecc_voodoo'):
 
-    # See the discussion on the following thread, in particular this suggestion by Peter Todd:
-    # https://bitcointalk.org/index.php?topic=260898.msg3040083#msg3040083
-    # It would be cleaner to do this with OP_IF / OP_ELSE logic in the transaction script, but that would fail IsStandard checks.
+        # Use ECC addition to combine the key of the person who wins on "yes" with the "yes" reality key
+        # ...and the key of the person who wins on "no" with the "no" reality key
+        # Hopefully this is a safe thing to be doing. Feedback gratefully received...
 
-    # TODO: Add a third key for the two parties so that they can settle themselves without Reality Keys if they prefer.
-    # Ideally we'd do;
-    # 2/4 yes_compound_public_key, no_compound_public_key, yes_winner_public_key, no_winner_public_key
-    # If that's non-standard (not sure), we might be able to do:
-    # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_public_key
-    # ... but this requires that Alice and Bob don't know each other's public keys in advance.
+        # See the discussion on the following thread, in particular this suggestion by Peter Todd:
+        # https://bitcointalk.org/index.php?topic=260898.msg3040083#msg3040083
 
-    yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
-    no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
+        # TODO: Add a third key for the two parties so that they can settle themselves without Reality Keys if they prefer.
+        # Ideally we'd do;
+        # 2/4 yes_compound_public_key, no_compound_public_key, yes_winner_public_key, no_winner_public_key
+        # If that's non-standard (not sure), we might be able to do:
+        # 1/3 yes_compound_public_key, no_compound_public_key, yes_winner_no_winner_compound_public_key
+        # ... but this requires that Alice and Bob don't know each other's public keys in advance.
 
-    multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
+        yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
+        no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
+
+        multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
+
+    else:
+
+        # Default to OP_IF / OP_ELSE logic, but which is cleaner but causes the redeem transaction to fail IsStandard checks.
+        multisig_script = mk_multisig_script_if_else([[yes_winner_public_key, yes_reality_key], [no_winner_public_key, no_reality_key]])
+        # print deserialize_script(multisig_script)
+
     pay_to_addr = p2sh_scriptaddr(multisig_script)
     if verbose:
         out.append("Made p2sh address: %s. Creating a transaction to fund it." % (pay_to_addr))
@@ -417,33 +515,42 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
         out.append("This fact has been decided but the winning key has not been published yet. Please try again later.")
         return out
 
-    # Combine the key of the person who wins on "yes" with the "yes" reality key
-    # ...and the key of the person who wins on "no" with the "no" reality key
-    # ...to recreate the p2sh address we created in setup
+    if (settings.get('ecc_voodoo')):
 
-    yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
-    no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
+        # Combine the key of the person who wins on "yes" with the "yes" reality key
+        # ...and the key of the person who wins on "no" with the "no" reality key
+        # ...to recreate the p2sh address we created in setup
 
-    winner_compound_private_key = add_privkeys(private_key, winner_privkey)
+        yes_compound_public_key = add_pubkeys(yes_winner_public_key, yes_reality_key)
+        no_compound_public_key = add_pubkeys(no_winner_public_key, no_reality_key)
 
-    # Make sure we can generate the public key from the private key we created.
-    # If we can't there's no point in trying to use it to spend the transaction.
-    try:
-        winner_public_key_from_winner_private_key = privtopub(winner_compound_private_key)
-    except:
-        raise Exception("An error occurred trying to recreate the expected public keys from the private key supplied, giving up.")
+        winner_compound_private_key = add_privkeys(private_key, winner_privkey)
 
-    if winner == "Yes":
-        if (yes_compound_public_key != winner_public_key_from_winner_private_key):
-            raise Exception("Could not recreate the expected public keys from the private key supplied. Are you sure you won?")
-    elif winner == "No":
-        if (no_compound_public_key != winner_public_key_from_winner_private_key):
-            raise Exception("Could not recreate the expected public keys from the private key supplied, Are you sure you won?.")
+        # Make sure we can generate the public key from the private key we created.
+        # If we can't there's no point in trying to use it to spend the transaction.
+        try:
+            winner_public_key_from_winner_private_key = privtopub(winner_compound_private_key)
+        except:
+            raise Exception("An error occurred trying to recreate the expected public keys from the private key supplied, giving up.")
+
+        if winner == "Yes":
+            if (yes_compound_public_key != winner_public_key_from_winner_private_key):
+                raise Exception("Could not recreate the expected public keys from the private key supplied. Are you sure you won?")
+        elif winner == "No":
+            if (no_compound_public_key != winner_public_key_from_winner_private_key):
+                raise Exception("Could not recreate the expected public keys from the private key supplied, Are you sure you won?.")
+        else:
+            raise Exception("Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner))
+
+        multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
+
     else:
-        raise Exception("Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner))
+
+        multisig_script = mk_multisig_script_if_else([[yes_winner_public_key, yes_reality_key], [no_winner_public_key, no_reality_key]])
+        print "if else script:"
+        print deserialize_script(multisig_script)
 
     # Regenerate the p2sh address we used during setup:
-    multisig_script = mk_multisig_script([yes_compound_public_key, no_compound_public_key], 1, 2)
     p2sh_address = p2sh_scriptaddr(multisig_script)
 
     transactions = [spendable_input(p2sh_address, 0, 0, 0, settings.get('inputs', None))]
@@ -468,9 +575,14 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
     outs = [{'value': val, 'address': pay_to_address}]
     tx = mktx(transactions, outs)
 
-    #print deserialize(tx)
-    sig1 = multisign(tx,0,multisig_script,winner_compound_private_key)
-    multi_tx = apply_multisignatures(tx,0,multisig_script,[sig1])
+    if settings.get('ecc_voodoo'):
+        #print deserialize(tx)
+        sig1 = multisign(tx,0,multisig_script,winner_compound_private_key)
+        multi_tx = apply_multisignatures(tx,0,multisig_script,[sig1])
+    else:
+        sig1 = multisign(tx,0,multisig_script,private_key)
+        sig2 = multisign(tx,0,multisig_script,winner_privkey)
+        multi_tx = apply_multisignatures_with_if_hint(tx,0,multisig_script,[sig1, sig2])
 
     if settings.get('no_pushtx', False):
         if verbose:
@@ -601,6 +713,7 @@ def create_parser():
 
     parser.add_argument( '--verbose', '-v', required=False, action='store_true', help='Verbose output')
     parser.add_argument( '--testnet', '-t', required=False, action='store_true', help='Use testnet instead of mainnet. (Some commands will only work with --no-pushtx)')
+    setup_parser.add_argument( '-e', '--ecc-voodoo', required=False, help='Use ECC addition to make a standard transaction (May not be safe)')
 
     return parser
 
