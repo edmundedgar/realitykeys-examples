@@ -57,24 +57,11 @@ MAX_TRANSACTION_FEE = 20000
 MIN_TRANSACTION_FEE = 10000
 DEFAULT_TRANSACTION_FEE = 10000
 
-def apply_multisignatures_with_if_hint(*args): # tx,i,script,sigs OR tx,i,script,sig1,sig2...,sig[n]
-    """A copy of the pybitcointools apply_multisignatures, but with an extra if
-    """
-
-    if_hint = 1
-    tx, i, script = args[0], int(args[1]), args[2]
-    sigs = args[3] if isinstance(args[3],list) else list(args[3:])
-
-    if re.match('^[0-9a-fA-F]*$',script): script = script.decode('hex')
-    sigs = [x.decode('hex') if x[:2] == '30' else x for x in sigs]
-    if re.match('^[0-9a-fA-F]*$',tx):
-        return apply_multisignatures_with_if_hint(tx.decode('hex'),i,script,sigs).encode('hex')
-
-    txobj = deserialize(tx)
-    txobj["ins"][i]["script"] = serialize_script([None]+sigs+[if_hint]+[script])
-    return serialize(txobj)
-
 def mk_multisig_script_if_else(combos):
+    """Make a redeem script requiring one of a pair of combinations.
+    To spend this, we expect a flag to be added to the signature to tell bitcoin which branch to follow.
+    This can be used where a normal m of n transaction would use mk_multisig_script
+    """
 
     combo1 = combos[0]
     combo2 = combos[1]
@@ -84,61 +71,46 @@ def mk_multisig_script_if_else(combos):
     OP_ELSE = 103
     OP_ENDIF = 104
 
-    num_required = len(combo1)
-    num_supplied = len(combo1)
-
     script_elements = []
 
-    # A dummy if that doesn't do anything
-    # script_elements.append(1)
     script_elements.append(OP_IF)
 
-    script_elements.append(num_supplied)
+    script_elements.append(len(combo1)) # num required
     script_elements.extend(combo1)
-    script_elements.append(num_required)
+    script_elements.append(len(combo1)) # num supplied
+    script_elements.append(OP_CHECKMULTISIG)
+
+    script_elements.append(OP_ELSE)
+
+    script_elements.append(len(combo2))
+    script_elements.extend(combo2)
+    script_elements.append(len(combo2))
     script_elements.append(OP_CHECKMULTISIG)
 
     script_elements.append(OP_ENDIF)
+    #print "made script elements:"
+    #print script_elements
 
     return serialize_script(script_elements)
-    #return serialize_script([num_required]+combo+[num_supplied,OP_CHECKMULTISIG])
 
-    # with flags (1)
-    # x sig sig 1 
-    # op_if
-    # 2 alice rk-yes
-    # op_else 
-    # 2 bob   rk-no
-    # op_endif
-    # 2 OP_CHECKSIG
-    script_str = ""
-    script_str = script_str + OP_IF
+def apply_multisignatures_with_if_flags(*args): # tx,i,script,sigs OR tx,i,script,sig1,sig2...,sig[n]
+    """A copy of the pybitcointools apply_multisignatures, but with an extra flag(s) for the "if" that follows
+    """
 
-    combo = combos[0]
-    num_required = len(combo)
-    num_supplied = num_required
-    num_required_hex = str(hex(num_required+OP_NUMBER_PLUS)).lstrip("0x")
-    num_supplied_hex = str(hex(num_supplied+OP_NUMBER_PLUS)).lstrip("0x")
-    script_str = script_str + num_supplied_hex
-    for pub in combo:
-        num_bytes_hex = str(hex(len(pub) / 2)).lstrip("0x")
-        script_str = script_str + num_bytes_hex + pub
-    script_str = script_str + num_required_hex # this could be once on the end for economy 
+    tx, i, script, if_flags = args[0], int(args[1]), args[2], args[3]
+    sigs = args[4] if isinstance(args[4],list) else list(args[4:])
 
-    script_str = script_str + OP_ELSE
+    if re.match('^[0-9a-fA-F]*$',script): script = script.decode('hex')
+    sigs = [x.decode('hex') if x[:2] == '30' else x for x in sigs]
+    if re.match('^[0-9a-fA-F]*$',tx):
+        return apply_multisignatures_with_if_flags(tx.decode('hex'),i,script,if_flags,sigs).encode('hex')
 
-    combo = combos[1]
-    script_str = script_str + num_supplied_hex
-    for pub in combo:
-        num_bytes_hex = str(hex(len(pub) / 2)).lstrip("0x")
-        script_str = script_str + num_bytes_hex + pub
-    script_str = script_str + num_required_hex # this could be once on the end for economy 
+    #print "using if flags:"
+    #print if_flags
 
-    script_str = script_str + OP_ENDIF 
-    script_str = script_str + OP_CHECKMULTISIGVERIFY
-
-    return script_str
-
+    txobj = deserialize(tx)
+    txobj["ins"][i]["script"] = serialize_script([None]+sigs+if_flags+[script])
+    return serialize(txobj)
 
 
 def user_private_key(create_if_missing=False, seed=None):
@@ -181,8 +153,10 @@ def user_private_key(create_if_missing=False, seed=None):
     return sha256(seed)
 
 def unspent_outputs(addr, filter_from_outputs=None):
-    """ If we were passed a list of outputs to use, filter them for the right address
-     Otherwise, fetch unspent outputs for the address from blockchain.info
+    """Perform the same role as pybitcointools unspent(), but allow an override for easier testing.
+    
+    If we were passed a list of outputs to use, return them filtered for the address. 
+    Otherwise, fetch unspent outputs for the address from blockchain.info
     """
     if filter_from_outputs is not None:
         unspents = []
@@ -410,7 +384,7 @@ def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no
 
         # Default to OP_IF / OP_ELSE logic, but which is cleaner but causes the redeem transaction to fail IsStandard checks.
         multisig_script = mk_multisig_script_if_else([[yes_winner_public_key, yes_reality_key], [no_winner_public_key, no_reality_key]])
-        # print deserialize_script(multisig_script)
+        #print deserialize_script(multisig_script)
 
     pay_to_addr = p2sh_scriptaddr(multisig_script)
     if verbose:
@@ -507,6 +481,8 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
     winner = fact_json['winner']
     winner_privkey = fact_json['winner_privkey']
 
+    #print "winner of fact %s is %s" % (winner, fact_id)
+
     if winner is None:
         out.append("The winner of this fact has not yet been decided. Please try again later.")
         return out
@@ -547,8 +523,8 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
     else:
 
         multisig_script = mk_multisig_script_if_else([[yes_winner_public_key, yes_reality_key], [no_winner_public_key, no_reality_key]])
-        print "if else script:"
-        print deserialize_script(multisig_script)
+        #print "if else script:"
+        #print deserialize_script(multisig_script)
 
     # Regenerate the p2sh address we used during setup:
     p2sh_address = p2sh_scriptaddr(multisig_script)
@@ -582,7 +558,14 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
     else:
         sig1 = multisign(tx,0,multisig_script,private_key)
         sig2 = multisign(tx,0,multisig_script,winner_privkey)
-        multi_tx = apply_multisignatures_with_if_hint(tx,0,multisig_script,[sig1, sig2])
+        if winner == 'Yes':
+                if_flags = [1] # pybitcointools will serialize this as OP_1 OP_TRUE (81)
+        elif winner == 'No':
+                if_flags = [None] # pybitcointools serializes this as OP_0 / OP_FALSE (0).
+        else:
+            raise Exception("Expected the winner to be Yes or No, but got \"%s\", now deeply confused, giving up." % (winner))
+                
+        multi_tx = apply_multisignatures_with_if_flags(tx,0,multisig_script,if_flags,[sig1, sig2])
 
     if settings.get('no_pushtx', False):
         if verbose:
