@@ -11,25 +11,24 @@
 #    ./realitykeysdemo.py makekeys
 #    Get the public key and send it to Bob.
 #    Temporarily fund her own address with her stake using any bitcoin client. 
-#    (This step makes things simpler here, although the script can be rewritten without it.)
+#    (This step makes things simpler here, although there are ways to avoid this step.)
 
 # Bob: Creates keys and sends the pubkey to Alice. 
 #    ./realitykeysdemo.py makekeys
 #    Get the public key and send it to Alice.
 #    Temporarily fund his own address with his stake.
-#    (This step makes things simpler here, although the script can be rewritten without it.)
 
 # Alice and Bob: Register a Reality Key, and get the ID <reality_key_id> from the URL.
-# NB They should make sure the Reality Keys were newly created and didn't exist before they exchanged keys.
+# NB If using ECC voodoo with the --ecc-voodoo option, they should make sure the Reality Keys were newly created and didn't exist before they exchanged keys.
 
 # If Bob or Alice disappears before completing the transaction, the other person can get the money back from the temporary address with:
 #    ./realitykeysdemo.py pay <address> <amount> [<fee>]"
 
 # Alice: 
-#    Creates a 1/2 (for now) P2SH address for combinations of ( her key + rk-yes ) or ( his key + rk-no ).
-#    Creates a transaction spending the contents of both her and Bob's temporary address to the P2SH address, signed with her private key.
+#    Creates a P2SH address spendable by a combination of ( her key + rk-yes ) or ( his key + rk-no ).
+#    Then creates a transaction spending the contents of both her and Bob's temporary address to the P2SH address, signed with her private key.
 #    ./realitykeysdemo.py setup <reality_key_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount>" 
-#    (This outputs a serialized, partially-signed transaction which she then sends to Bob to complete and broadcast.)
+#    (This outputs a serialized, partially-signed transaction which she then sends to Bob who will complete and broadcast it.)
 
 # Bob: Recreates Alice's transaction to make sure he gets the same thing, then signs it with his private key and broadcasts it.
 #    ./realitykeysdemo.py setup <reality_key_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> <transaction_only_half_signed>" 
@@ -38,8 +37,6 @@
 
 # Alice or Bob (whoever wins):
 #    ./realitykeysdemo.py claim <reality_key_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<pay_to_address>]
-#    If the broadcast fails, the script will output the transaction to send to some other bitcoind somewhere, eg:
-#    ./bitcoind sendrawtransaction <transaction> 
 
 from pybitcointools import * # https://github.com/vbuterin/pybitcointools
 
@@ -59,8 +56,9 @@ DEFAULT_TRANSACTION_FEE = 10000
 
 def mk_multisig_script_if_else(combos):
     """Make a redeem script requiring one of a pair of combinations.
-    To spend this, we expect a flag to be added to the signature to tell bitcoin which branch to follow.
+    To spend this, we will expect a flag to be added to the signature to tell bitcoin which branch to follow.
     This can be used where a normal m of n transaction would use mk_multisig_script
+    NB Doing this makes the redeem transaction non-standard.
     """
 
     combo1 = combos[0]
@@ -94,7 +92,9 @@ def mk_multisig_script_if_else(combos):
     return serialize_script(script_elements)
 
 def apply_multisignatures_with_if_flags(*args): # tx,i,script,sigs OR tx,i,script,sig1,sig2...,sig[n]
-    """A copy of the pybitcointools apply_multisignatures, but with an extra flag(s) for the "if" that follows
+    """Sign a transaction, including the necessary flags to complete a transaction created with mk_multisig_script_if_else.
+    
+    This is the same as pybitcointools apply_multisignatures, except for the extra flag(s).
     """
 
     tx, i, script, if_flags = args[0], int(args[1]), args[2], args[3]
@@ -118,18 +118,14 @@ def user_private_key(create_if_missing=False, seed=None):
 
     Normally it would come from a seed in a file in the user's home directory, generated during makekeys.
 
-    Alternatively it can be specified as an environment parameter, in which case the seed file will be ignored.
+    Alternatively it can be specified as a --seed parameter, in which case the seed file will be ignored.
     For example, you might run:
-    SEED='alice-9823jeijldijfiljilfjaeidfjsfksdjfkdfjkdfj102OSIJDIFJDijifjdsjfxd' ./realitykeysdemo.py setup etc etc etc
+    ./realitykeysdemo.py --seed='alice-9823jeijldijfiljilfjaeidfjsfksdjfkdfjkdfj102OSIJDIFJDijifjdsjfxd' setup etc etc etc
     This is useful when experimenting, because it allows you to switch between test users easily.
 
     """
-    #print "using seed %s " % (seed)
 
-    # Otherwise try to get it from a dotfile in the user's home directory or equivalent.
     if seed is None:
-
-        #print "no seed, getting from file"
 
         home_dir = os.getenv('HOME')
         if home_dir is None:
@@ -163,7 +159,7 @@ def unspent_outputs(addr, filter_from_outputs=None):
         for o in filter_from_outputs:
             parts = o.split(":")
             o_addr = parts[0]
-            # allow an optional blank address to just assume it's for us
+            # if no address is specified, just assume we want to use this input
             if o_addr != "" and o_addr != addr:
                 continue
             tx_id = parts[1]
@@ -183,6 +179,7 @@ def unspent_outputs(addr, filter_from_outputs=None):
 
 def spendable_input(addr, stake_amount, min_transaction_fee, max_transaction_fee=0, inputs=None):
     """Return an output for the specified amount, plus fee, or None if it couldn't find one.
+
     Fetched by querying blockchain.info, or by passing a list in here as inputs.
     This is very primitive, and assumes you've already put exactly the right amount into the address.
     """
@@ -217,6 +214,7 @@ def spendable_input(addr, stake_amount, min_transaction_fee, max_transaction_fee
 
 def magic_byte(settings):
     """The magic byte to be used for addresses.
+
     Only supports bitcoin and bitcoin testnet, would need to be modified for other coins.
     """
     if settings.get('testnet', False):
@@ -271,7 +269,8 @@ def execute_makekeys(settings):
     return out
 
 def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx): 
-    """Create a P2SH address spendable by the each person's own key combined with the appropriate reality key.
+    """Create a transaction to a P2SH address spendable by the each person's own key plus with the appropriate reality key.
+
     If passed a half-signed version of the transaction created like that, sign it and broadcast it.
     If not, create and output a half-signed version of the transaction to send to the other party to complete.
     """
@@ -288,7 +287,6 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
     # The private key of the person currently using the script.
     # Both parties will need to run the script in turn, substituting their own public keys.
     private_key = user_private_key(False, seed)
-    #print "my priv key is %s" % (private_key)
 
     # Find out if the current user is we're representing yes or no.
     # This will tell us which input to sign, and help us provide user feedback.
@@ -364,7 +362,6 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
         # Use ECC addition to combine the key of the person who wins on "yes" with the "yes" reality key
         # ...and the key of the person who wins on "no" with the "no" reality key
         # Hopefully this is a safe thing to be doing. Feedback gratefully received...
-
         # See the discussion on the following thread, in particular this suggestion by Peter Todd:
         # https://bitcointalk.org/index.php?topic=260898.msg3040083#msg3040083
 
@@ -402,14 +399,10 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
     # It should be the same except that ours is unsigned, in which case we'll throw away our transaction and use theirs instead.
     signatures_done = 0
     if existing_tx is not None:
-        #print existing_tx
         their_tx = deserialize(existing_tx)
         our_tx = deserialize(tx)
         # Compare the transactions, except the inputs, which are signed and we don't care anyway.
         # Alternatively we could go through these and just remove the signatures, but it shouldn't matter.
-        # Being honest they haven't horsed around with their tx and sent us this instead.
-        # If they had we'd catch them here.
-        # their_tx['outs'] = [{'value': 110000, 'script': '1NGtmZttBEUGWTTGGyQTHTTrC76dHXPEZt'}]
         our_tx['ins'] = []
         their_tx['ins'] = []
         if serialize(our_tx) != serialize(their_tx):
@@ -417,24 +410,15 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
         tx = existing_tx
         signatures_done = signatures_done + 1
 
-    #print "Unsigned:"
-    #print deserialize(tx)
-
     # Sign whichever of the inputs we have the private key for. 
     # Since we only allow one input per person, and we add them ourselves, we can assume yes is first and no is second.
     if (am_i_yes_or_no == 'yes') and (yes_stake_amount > 0):
-        #print "i am yes, signing 0"
         tx = sign(tx,0,private_key)
         signatures_done = signatures_done + 1
-        #print "Signed yes:"
-        #print deserialize(tx)
 
     if (am_i_yes_or_no == 'no') and (no_stake_amount > 0):
-        #print "i am no, signing 1"
         tx = sign(tx,1,private_key)
         signatures_done = signatures_done + 1
-        #print "Signed no:"
-        #print deserialize(tx)
 
     if signatures_needed == signatures_done:
         if settings.get('no_pushtx', False):
@@ -481,8 +465,6 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
     winner = fact_json['winner']
     winner_privkey = fact_json['winner_privkey']
 
-    #print "winner of fact %s is %s" % (winner, reality_key_id)
-
     if winner is None:
         out.append("The winner of this fact has not yet been decided. Please try again later.")
         return out
@@ -526,9 +508,8 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
         #print "if else script:"
         #print deserialize_script(multisig_script)
 
-    # Regenerate the p2sh address we used during setup:
+    # Regenerate the p2sh address we used during setup so we can find the outputs it has for us to spend:
     p2sh_address = p2sh_scriptaddr(multisig_script)
-
     transactions = [spendable_input(p2sh_address, 0, 0, 0, settings.get('inputs', None))]
 
     if len(transactions) == 0:
@@ -552,7 +533,6 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
     tx = mktx(transactions, outs)
 
     if settings.get('ecc_voodoo'):
-        #print deserialize(tx)
         sig1 = multisign(tx,0,multisig_script,winner_compound_private_key)
         multi_tx = apply_multisignatures(tx,0,multisig_script,[sig1])
     else:
@@ -572,17 +552,15 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
             out.append("Created the following transaction, but won't broadcast it because you specified --no_pushtx:")
         out.append(multi_tx)
     else:
-        # blockchain.info seems to reject this transaction.
-        # confusingly, it seems to go ok with bitcoind
         try:
-            pushtx(multi_tx)
+            eligius_pushtx(multi_tx) # This should work even if the transaction 
         except:
             try:
-                eligius_pushtx(multi_tx)
+                pushtx(multi_tx) # Try blockchain.info, which will almost definitely fail unless we're using ECC voodoo
             except:
                 if verbose:
-                    out.append("We think this should be a valid, standard transaction, but the blockchain.info API won't accept it.")
-                    out.append("You can send it with bitcoind instead:")
+                    out.append("We were unable to broadcast your transaction.")
+                    out.append("You can try again later, or try sending it another way:")
                     out.append("./bitcoind sendrawtransaction %s" % (multi_tx))
                 else: 
                     out.append(multi_tx)
@@ -664,11 +642,12 @@ def create_parser():
         description='Create, setup or claim a contract using Reality Keys.'
     )
 
-    subparsers = parser.add_subparsers(dest='command', help='Start with ./realitykeysdemo.py -v makekeys')
+    #subparsers = parser.add_subparsers(dest='command', help='Start with: ./realitykeysdemo.py -v makekeys')
+    subparsers = parser.add_subparsers(dest='command')
     makekeys_parser = subparsers.add_parser('makekeys', help='Create and store keys if necessary, output the address and public key.')
     setup_parser = subparsers.add_parser('setup', help='Setup or complete a contract.')
     claim_parser = subparsers.add_parser('claim', help='Claim the winnings from a contract you have won.')
-    pay_parser = subparsers.add_parser('pay', help='Make a payment from the temporary address we use.')
+    pay_parser = subparsers.add_parser('pay', help='Make a payment from the temporary address created by makekeys.')
 
     for p in [setup_parser, claim_parser]:
         p.add_argument( 'fact-id', type=int, help='The ID of the Reality Keys fact you want to base your contract on.')
