@@ -226,7 +226,7 @@ def execute_makekeys(settings):
     """Create a random seed and generate a key from it, and output the corresponding public key and address.
 
     If the seed already exists, leave it as it is and just output the information about it again.
-    If the SEED environmental variable was set, forget about the seed file and work from that instead.
+    If the --seed parameter was supplied, forget about the seed file and work from that instead.
     """
 
     seed = settings.get('seed', None)
