@@ -19,7 +19,7 @@
 #    Temporarily fund his own address with his stake.
 #    (This step makes things simpler here, although the script can be rewritten without it.)
 
-# Alice and Bob: Register a Reality Key, and get the ID <fact_id> from the URL.
+# Alice and Bob: Register a Reality Key, and get the ID <reality_key_id> from the URL.
 # NB They should make sure the Reality Keys were newly created and didn't exist before they exchanged keys.
 
 # If Bob or Alice disappears before completing the transaction, the other person can get the money back from the temporary address with:
@@ -28,16 +28,16 @@
 # Alice: 
 #    Creates a 1/2 (for now) P2SH address for combinations of ( her key + rk-yes ) or ( his key + rk-no ).
 #    Creates a transaction spending the contents of both her and Bob's temporary address to the P2SH address, signed with her private key.
-#    ./realitykeysdemo.py setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount>" 
+#    ./realitykeysdemo.py setup <reality_key_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount>" 
 #    (This outputs a serialized, partially-signed transaction which she then sends to Bob to complete and broadcast.)
 
 # Bob: Recreates Alice's transaction to make sure he gets the same thing, then signs it with his private key and broadcasts it.
-#    ./realitykeysdemo.py setup <fact_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> <transaction_only_half_signed>" 
+#    ./realitykeysdemo.py setup <reality_key_id> <yes_winner_public_key> <yes_stake_amount> <no_winner_public_key> <no_stake_amount> <transaction_only_half_signed>" 
 
 # ...Wait until the result is issued...
 
 # Alice or Bob (whoever wins):
-#    ./realitykeysdemo.py claim <fact_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<pay_to_address>]
+#    ./realitykeysdemo.py claim <reality_key_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<pay_to_address>]
 #    If the broadcast fails, the script will output the transaction to send to some other bitcoind somewhere, eg:
 #    ./bitcoind sendrawtransaction <transaction> 
 
@@ -264,13 +264,13 @@ def execute_makekeys(settings):
     if verbose:
         out.append("Next step: Exchange keys, pay your stake to %s, have them pay their stake to their address, then one of you runs:" % (addr))
         out.append("If you are yes:")
-        out.append("./realitykeysdemo.py setup <fact_id> %s <your_stake_in_satoshis> <their_public_key> <their_stake_in_satoshis>" % (pub))
+        out.append("./realitykeysdemo.py setup <reality_key_id> %s <your_stake_in_satoshis> <their_public_key> <their_stake_in_satoshis>" % (pub))
         out.append("If you are no:")
-        out.append("./realitykeysdemo.py setup <fact_id> <their_public_key> <their_stake_in_satoshis> %s <your_stake_in_satoshis>" % (pub))
+        out.append("./realitykeysdemo.py setup <reality_key_id> <their_public_key> <their_stake_in_satoshis>  %s <your_stake_in_satoshis>" % (pub))
 
     return out
 
-def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx): 
+def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amount, no_winner_public_key, no_stake_amount, existing_tx): 
     """Create a P2SH address spendable by the each person's own key combined with the appropriate reality key.
     If passed a half-signed version of the transaction created like that, sign it and broadcast it.
     If not, create and output a half-signed version of the transaction to send to the other party to complete.
@@ -278,7 +278,7 @@ def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no
 
     out = []
 
-    fact_id = str(fact_id)
+    reality_key_id = str(reality_key_id)
     verbose = settings.get('verbose', False)
     seed = settings.get('seed', None)
 
@@ -353,7 +353,7 @@ def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no
         return out 
 
     # Fetch the reality key public keys for yes and no.
-    req = urllib2.Request(REALITY_KEYS_API % (fact_id))
+    req = urllib2.Request(REALITY_KEYS_API % (reality_key_id))
     response = urllib2.urlopen(req)
     fact_json = simplejson.load(response)
     yes_reality_key = fact_json['yes_pubkey']   
@@ -447,18 +447,18 @@ def execute_setup(settings, fact_id, yes_winner_public_key, yes_stake_amount, no
                 out.append(tx)
                 pushtx(tx)
                 out.append("Next step: Wait for the result, then the winner runs:")
-                out.append("./realitykeysdemo.py claim %s %s %s [<fee>] [<pay_to_address>]" % (fact_id, yes_winner_public_key, no_winner_public_key))
+                out.append("./realitykeysdemo.py claim %s %s %s [<fee>] [<pay_to_address>]" % (reality_key_id, yes_winner_public_key, no_winner_public_key))
     else:
         if verbose:
             out.append("Created a transaction:")
         out.append(tx)
         if verbose:
             out.append("Next step: The other party runs:")
-            out.append("./realitykeysdemo.py setup %s %s %s %s %s %s" % (fact_id, yes_winner_public_key, str(yes_stake_amount), no_winner_public_key, str(no_stake_amount), tx))
+            out.append("./realitykeysdemo.py setup %s %s %s %s %s %s" % (reality_key_id, yes_winner_public_key, str(yes_stake_amount), no_winner_public_key, str(no_stake_amount), tx))
 
     return out
 
-def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key, fee=0, pay_to_address=None):
+def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_public_key, fee=0, pay_to_address=None):
     """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <pay_to_address>
     """
 
@@ -472,7 +472,7 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
         pay_to_address = pubtoaddr(privtopub(private_key), magic_byte(settings))
     
     # Get the reality keys representing "yes" and "no".
-    req = urllib2.Request(REALITY_KEYS_API % (fact_id))
+    req = urllib2.Request(REALITY_KEYS_API % (reality_key_id))
     response = urllib2.urlopen(req)
     fact_json = simplejson.load(response)
     yes_reality_key = fact_json['yes_pubkey']   
@@ -481,7 +481,7 @@ def execute_claim(settings, fact_id, yes_winner_public_key, no_winner_public_key
     winner = fact_json['winner']
     winner_privkey = fact_json['winner_privkey']
 
-    #print "winner of fact %s is %s" % (winner, fact_id)
+    #print "winner of fact %s is %s" % (winner, reality_key_id)
 
     if winner is None:
         out.append("The winner of this fact has not yet been decided. Please try again later.")
@@ -637,23 +637,23 @@ def execute_pay(settings, pay_to_addr, pay_amount, fee):
 def main():
 
     parser = create_parser()
-    args = parser.parse_args()
+    args = vars(parser.parse_args())
 
     settings = {
-        'verbose': args.verbose,
-        'testnet': args.testnet,
-        'no_pushtx': args.no_pushtx,
-        'seed': args.seed,
-        'inputs': args.inputs
+        'verbose': args.get('verbose', False),
+        'testnet': args.get('testnet', False),
+        'seed': args.get('seed', False),
+        'no_pushtx': args.get('no_pushtx', False),
+        'inputs': args.get('inputs', None)
     }
 
-    command = args.command
+    command = args.get('command')
     if command == "makekeys":
         out = execute_makekeys(settings)
     elif command == "setup":
-        out = execute_setup(settings, args.fact_id, args.yes_key, args.yes_stake, args.no_key, args.no_stake, args.transaction)
+        out = execute_setup(settings, args.reality_key_id, args.yes_key, args.yes_stake, args.no_key, args.no_stake, args.transaction)
     elif command == "claim":
-        out = execute_claim(settings, args.fact_id, args.yes_key, args.no_key, args.fee, args.pay_to_address)
+        out = execute_claim(settings, args.reality_key_id, args.yes_key, args.no_key, args.fee, args.pay_to_address)
     elif command == "pay":
         out = execute_pay(settings, args.pay_to_address, args.amount, args.fee)
 
@@ -664,39 +664,44 @@ def create_parser():
         description='Create, setup or claim a contract using Reality Keys.'
     )
 
-    subparsers = parser.add_subparsers(dest='command',help='Commands: makekeys create claim pay')
-    makekeys_parser = subparsers.add_parser('makekeys')
-    setup_parser = subparsers.add_parser('setup')
-    claim_parser = subparsers.add_parser('claim')
-    pay_parser = subparsers.add_parser('pay')
+    subparsers = parser.add_subparsers(dest='command', help='Start with ./realitykeysdemo.py -v makekeys')
+    makekeys_parser = subparsers.add_parser('makekeys', help='Create and store keys if necessary, output the address and public key.')
+    setup_parser = subparsers.add_parser('setup', help='Setup or complete a contract.')
+    claim_parser = subparsers.add_parser('claim', help='Claim the winnings from a contract you have won.')
+    pay_parser = subparsers.add_parser('pay', help='Make a payment from the temporary address we use.')
 
-    setup_parser.add_argument( '-y', '--yes-key', required=False, help='The public key of the user representing "yes"')
-    setup_parser.add_argument( '-Y', '--yes-stake', type=int, required=False, help='The number of statoshis staked by the party representing "yes"')
-    claim_parser.add_argument( '-y', '--yes-key', required=False, help='The public key of the user representing "yes"')
+    for p in [setup_parser, claim_parser]:
+        p.add_argument( 'fact-id', type=int, help='The ID of the Reality Keys fact you want to base your contract on.')
+        p.add_argument( 'yes-key', help='The public key of the user representing "yes".')
 
-    setup_parser.add_argument( '-n', '--no-key', required=False, help='The public key of the user representing "no"')
-    setup_parser.add_argument( '-N', '--no-stake', type=int, required=False, help='The number of statoshis staked by the party representing "no"')
-    claim_parser.add_argument( '-n', '--no-key', required=False, help='The public key of the user representing "no"')
+    for p in [setup_parser]:
+        p.add_argument( 'yes-stake', type=int, help='The number of statoshis staked by the party representing "yes".')
 
-    setup_parser.add_argument( '-r', '--fact-id', type=int, required=False, help='The ID of the Reality Keys fact you want to base your contract on (assumes freebase)')
-    claim_parser.add_argument( '-r', '--fact-id', type=int, required=False, help='The ID of the Reality Keys fact you want to base your contract on (assumes freebase)')
+    for p in [setup_parser, claim_parser]:
+        p.add_argument( 'no-key', help='The public key of the user representing "no".')
 
-    setup_parser.add_argument( '-x', '--transaction', required=False, help='A serialized, part-signed transaction')
-    claim_parser.add_argument( '-d', '--pay-to-address', required=False, help='The address to send money to (pay and claim)')
-    pay_parser.add_argument( '-d', '--pay-to-address', required=False, help='The address to send money to (pay and claim)')
+    for p in [setup_parser]:
+        setup_parser.add_argument( 'no-stake', type=int, help='The number of statoshis staked by the party representing "no".')
 
+    for p in [setup_parser]:
+        setup_parser.add_argument( 'transaction', nargs='?', help='(Optional) serialized, part-signed transaction that you want to check, complete and broadcast.')
 
-    parser.add_argument( '--no-pushtx', '-P', required=False, action='store_true', help='Do not push tx')
-    parser.add_argument( '--seed', '-s', required=False, help='Seed for key generation. If not supplied this will be created automatically and stored.')
+    for p in [claim_parser, pay_parser]:
+        p.add_argument( '-d', '--destination-address', required=False, help='The address to send money to.')
+        p.add_argument( '-e', '--ecc-voodoo', required=False, help='Use ECC addition to make a standard transaction (May be interestingly dangerous).')
 
-    parser.add_argument( '--inputs', '-i', action='append', required=False, default=[], help='The inputs to use in transactions. If not stated we will try to fetch available inputs from the network.')
-    parser.add_argument( '--fee', '-f', type=int, required=False, default=DEFAULT_TRANSACTION_FEE, help='The address to send money to (pay and claim)')
+    for p in [setup_parser, claim_parser, pay_parser]:
+        p.add_argument( '-P', '--no-pushtx', required=False, action='store_true', help='Do not push the transaction to the network, even if it is complete.')
+        p.add_argument( '-i', '--inputs', action='append', required=False, default=[], help='The inputs to use in transactions, in the format "address:txid:n:amount". If not stated we will try to fetch available inputs from the network.')
+        p.add_argument( '-f', '--fee', type=int, required=False, default=DEFAULT_TRANSACTION_FEE, help='The fee to pay.')
 
-    pay_parser.add_argument( '-a', '--amount', type=int, required=False, default=0, help='The amount of money to send (pay and claim)')
+    for p in [pay_parser]:
+        pay_parser.add_argument( '-a', '--amount', type=int, required=False, default=0, help='The amount of money to pay.')
 
-    parser.add_argument( '--verbose', '-v', required=False, action='store_true', help='Verbose output')
-    parser.add_argument( '--testnet', '-t', required=False, action='store_true', help='Use testnet instead of mainnet. (Some commands will only work with --no-pushtx)')
-    setup_parser.add_argument( '-e', '--ecc-voodoo', required=False, help='Use ECC addition to make a standard transaction (May not be safe)')
+    for p in [makekeys_parser, setup_parser, claim_parser, pay_parser]:
+        p.add_argument( '-v', '--verbose', required=False, action='store_true', help='Verbose output.')
+        p.add_argument( '-t', '--testnet', required=False, action='store_true', help='Use testnet instead of mainnet. (Some commands will only work with --no-pushtx, and other require you to specify inputs with --inputs).')
+        p.add_argument( '-s', '--seed', required=False, help='Seed for key generation, replacing the normal behaviour of using a seed made and storing a seed when you call makekeys.')
 
     return parser
 
