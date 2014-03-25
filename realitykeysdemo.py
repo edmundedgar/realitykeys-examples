@@ -22,7 +22,7 @@
 # NB If using ECC voodoo with the --ecc-voodoo option, they should make sure the Reality Keys were newly created and didn't exist before they exchanged keys.
 
 # If Bob or Alice disappears before completing the transaction, the other person can get the money back from the temporary address with:
-#    ./realitykeysdemo.py pay <address> <amount> [<fee>]"
+#    ./realitykeysdemo.py pay <address> -a <amount> -f [<fee>]"
 
 # Alice: 
 #    Creates a P2SH address spendable by a combination of ( her key + rk-yes ) or ( his key + rk-no ).
@@ -36,7 +36,7 @@
 # ...Wait until the result is issued...
 
 # Alice or Bob (whoever wins):
-#    ./realitykeysdemo.py claim <reality_key_id> <yes_winner_public_key> <no_winner_public_key> [<fee>] [<pay_to_address>]
+#    ./realitykeysdemo.py claim <reality_key_id> <yes_winner_public_key> <no_winner_public_key> -f [<fee>] -d [<destination_address>]
 
 from pybitcointools import * # https://github.com/vbuterin/pybitcointools
 
@@ -154,7 +154,7 @@ def unspent_outputs(addr, filter_from_outputs=None):
     If we were passed a list of outputs to use, return them filtered for the address. 
     Otherwise, fetch unspent outputs for the address from blockchain.info
     """
-    if filter_from_outputs is not None:
+    if filter_from_outputs is not None and len(filter_from_outputs) > 0:
         unspents = []
         for o in filter_from_outputs:
             parts = o.split(":")
@@ -188,8 +188,8 @@ def spendable_input(addr, stake_amount, min_transaction_fee, max_transaction_fee
     if len(outputs) == 0:
         return None
 
-    if len(outputs) > 1:
-        return None
+    #if len(outputs) > 1:
+    #    return None
 
     for o in outputs:
 
@@ -431,7 +431,7 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
                 out.append(tx)
                 pushtx(tx)
                 out.append("Next step: Wait for the result, then the winner runs:")
-                out.append("./realitykeysdemo.py claim %s %s %s [<fee>] [<pay_to_address>]" % (reality_key_id, yes_winner_public_key, no_winner_public_key))
+                out.append("./realitykeysdemo.py claim %s %s %s -f [<fee>] -d [<destination_address>]" % (reality_key_id, yes_winner_public_key, no_winner_public_key))
     else:
         if verbose:
             out.append("Created a transaction:")
@@ -442,8 +442,8 @@ def execute_setup(settings, reality_key_id, yes_winner_public_key, yes_stake_amo
 
     return out
 
-def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_public_key, fee=0, pay_to_address=None):
-    """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <pay_to_address>
+def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_public_key, fee=0, destination_address=None):
+    """When executed by the winner, creates the P2SH address used in previous contracts and spends the contents to <destination_address>
     """
 
     out = []
@@ -452,8 +452,8 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
     seed = settings.get('seed', None)
 
     private_key = user_private_key(False, seed)
-    if pay_to_address is None:
-        pay_to_address = pubtoaddr(privtopub(private_key), magic_byte(settings))
+    if destination_address is None:
+        destination_address = pubtoaddr(privtopub(private_key), magic_byte(settings))
     
     # Get the reality keys representing "yes" and "no".
     req = urllib2.Request(REALITY_KEYS_API % (reality_key_id))
@@ -529,7 +529,7 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
     if verbose:
         out.append("Found %s in the P2SH address" % (str(val)))
 
-    outs = [{'value': val, 'address': pay_to_address}]
+    outs = [{'value': val, 'address': destination_address}]
     tx = mktx(transactions, outs)
 
     if settings.get('ecc_voodoo'):
@@ -553,11 +553,14 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
         out.append(multi_tx)
     else:
         try:
+            #print "sending %s to eligius" % (multi_tx)
             eligius_pushtx(multi_tx) # This should work even if the transaction 
         except:
             try:
+                #print "failed, trying blockchain"
                 pushtx(multi_tx) # Try blockchain.info, which will almost definitely fail unless we're using ECC voodoo
             except:
+                #print "failed, give up"
                 if verbose:
                     out.append("We were unable to broadcast your transaction.")
                     out.append("You can try again later, or try sending it another way:")
@@ -565,6 +568,7 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
                 else: 
                     out.append(multi_tx)
 
+    #print "done"
     return out
 
 def execute_pay(settings, pay_to_addr, pay_amount, fee):
@@ -615,25 +619,26 @@ def execute_pay(settings, pay_to_addr, pay_amount, fee):
 def main():
 
     parser = create_parser()
-    args = vars(parser.parse_args())
+    args = parser.parse_args()
+    setting_args = vars(args)
 
     settings = {
-        'verbose': args.get('verbose', False),
-        'testnet': args.get('testnet', False),
-        'seed': args.get('seed', False),
-        'no_pushtx': args.get('no_pushtx', False),
-        'inputs': args.get('inputs', None)
+        'verbose': not setting_args.get('quiet', False),
+        'testnet': setting_args.get('testnet', False),
+        'seed': setting_args.get('seed', False),
+        'no_pushtx': setting_args.get('no_pushtx', False),
+        'inputs': setting_args.get('inputs', None)
     }
 
-    command = args.get('command')
+    command = args.command
     if command == "makekeys":
         out = execute_makekeys(settings)
     elif command == "setup":
         out = execute_setup(settings, args.reality_key_id, args.yes_key, args.yes_stake, args.no_key, args.no_stake, args.transaction)
     elif command == "claim":
-        out = execute_claim(settings, args.reality_key_id, args.yes_key, args.no_key, args.fee, args.pay_to_address)
+        out = execute_claim(settings, args.reality_key_id, args.yes_key, args.no_key, args.fee, args.destination_address)
     elif command == "pay":
-        out = execute_pay(settings, args.pay_to_address, args.amount, args.fee)
+        out = execute_pay(settings, args.destination_address, args.amount, args.fee)
 
     print "\n".join(out)
 
@@ -650,17 +655,17 @@ def create_parser():
     pay_parser = subparsers.add_parser('pay', help='Make a payment from the temporary address created by makekeys.')
 
     for p in [setup_parser, claim_parser]:
-        p.add_argument( 'fact-id', type=int, help='The ID of the Reality Keys fact you want to base your contract on.')
-        p.add_argument( 'yes-key', help='The public key of the user representing "yes".')
+        p.add_argument( 'reality_key_id', type=int, help='The ID of the Reality Keys fact you want to base your contract on.')
+        p.add_argument( 'yes_key', help='The public key of the user representing "yes".')
 
     for p in [setup_parser]:
-        p.add_argument( 'yes-stake', type=int, help='The number of statoshis staked by the party representing "yes".')
+        p.add_argument( 'yes_stake', type=int, help='The number of statoshis staked by the party representing "yes".')
 
     for p in [setup_parser, claim_parser]:
-        p.add_argument( 'no-key', help='The public key of the user representing "no".')
+        p.add_argument( 'no_key', help='The public key of the user representing "no".')
 
     for p in [setup_parser]:
-        setup_parser.add_argument( 'no-stake', type=int, help='The number of statoshis staked by the party representing "no".')
+        setup_parser.add_argument( 'no_stake', type=int, help='The number of statoshis staked by the party representing "no".')
 
     for p in [setup_parser]:
         setup_parser.add_argument( 'transaction', nargs='?', help='(Optional) serialized, part-signed transaction that you want to check, complete and broadcast.')
@@ -678,7 +683,7 @@ def create_parser():
         pay_parser.add_argument( '-a', '--amount', type=int, required=False, default=0, help='The amount of money to pay.')
 
     for p in [makekeys_parser, setup_parser, claim_parser, pay_parser]:
-        p.add_argument( '-v', '--verbose', required=False, action='store_true', help='Verbose output.')
+        p.add_argument( '-q', '--quiet', required=False, action='store_true', help='Suppress all but essential output.')
         p.add_argument( '-t', '--testnet', required=False, action='store_true', help='Use testnet instead of mainnet. (Some commands will only work with --no-pushtx, and other require you to specify inputs with --inputs).')
         p.add_argument( '-s', '--seed', required=False, help='Seed for key generation, replacing the normal behaviour of using a seed made and storing a seed when you call makekeys.')
 
