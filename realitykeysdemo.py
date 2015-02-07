@@ -2,7 +2,10 @@
 
 # This script allows two parties who don't trust each other to create a contract conditional on the outcome of a Reality Key.
 # The actual Reality Keys are fetched automatically using the Reality Keys API, so the users only need to supply their own keys.
-# It requires pybitcointools, which you can get here:
+# It requires pybitcointools. It has been tested on version 1.1.15
+# You can install this with 
+# pip install pybitcointools
+# Pybitcointools is maintained here, but as of 2015-02-07 the script does not work correctly with the master branch:
 # https://github.com/vbuterin/pybitcointools
 
 # Steps:
@@ -553,12 +556,12 @@ def execute_claim(settings, reality_key_id, yes_winner_public_key, no_winner_pub
         out.append(multi_tx)
     else:
         try:
-            #print "sending %s to eligius" % (multi_tx)
-            eligius_pushtx(multi_tx) # This should work even if the transaction 
+            #print "sending to blockchain.info "
+            pushtx(multi_tx) # Try blockchain.info
         except:
             try:
-                #print "failed, trying blockchain"
-                pushtx(multi_tx) # Try blockchain.info, which will almost definitely fail unless we're using ECC voodoo
+                #print "failed, trying eligius"
+                eligius_pushtx(multi_tx) # This should work even if the transaction 
             except:
                 #print "failed, give up"
                 if verbose:
