@@ -96,7 +96,7 @@ def mk_multisig_script_if_else(combos):
 
     return serialize_script(script_elements)
 
-def apply_multisignatures_with_if_flags(*args): # tx,i,script,sigs OR tx,i,script,sig1,sig2...,sig[n]
+def apply_multisignatures_with_if_flags(*args): # tx,i,script,if_flags,sigs OR tx,i,script,if_flags,sig1,sig2...,sig[n]
     """Sign a transaction, including the necessary flags to complete a transaction created with mk_multisig_script_if_else.
     
     This is the same as pybitcointools apply_multisignatures, except for the extra flag(s).
